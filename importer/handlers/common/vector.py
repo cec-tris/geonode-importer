@@ -161,11 +161,16 @@ class BaseVectorFileHandler(BaseHandler):
         )
         options += f'"{files.get("base_file")}"' + " "
         #        options += "-lco DIM=2 "
-        options += f'-nln {alternate} "{original_name}"'
+        # TODO: chumano:  add datahubid
+        if not getattr(settings, "DATAHUB_ENABLED", False):
+            options += f'-nln {alternate} "{original_name}"'
+        else: 
+            options += create_datahub_options(files, original_name, alternate)
 
         if ovverwrite_layer:
             options += " -overwrite"
-
+        
+        logger.info("[chumano] DATAHUB_ENABLED: "+ options)
         return options
 
     @staticmethod
@@ -972,3 +977,23 @@ def normalize_ogr2ogr_error(err, original_name):
     return ", ".join(
         [x.split(original_name)[0] for x in getting_errors if "ERROR" in x]
     )
+
+#chumano:  add datahubid
+DATAHUB_ID_FIELD = getattr(settings, "DATAHUB_ID_FIELD", "datahubid")
+def create_datahub_options(files, original_name, alternate):
+    
+    add_datahubid_field = not check_datahubid_field_exists(files, original_name)
+    # check data exist datahubid column
+    rplace = f'"{original_name}"'
+    if add_datahubid_field:
+        generated_id = f"lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-' || '4' || substr(hex( randomblob(2)), 2) || '-' || substr('AB89', 1 + (abs(random()) % 4) , 1)  || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))"
+        rplace = f"-dialect SQLite -sql \"SELECT {generated_id} as {DATAHUB_ID_FIELD}, * FROM {original_name}\""
+
+    options = f'-nln {alternate} {rplace}'
+    return options
+
+def check_datahubid_field_exists(files, original_name):
+    layers = ogr.Open(files.get("base_file"))
+    layer = layers.GetLayer(original_name)
+    fields = [x.name for x in layer.schema]
+    return DATAHUB_ID_FIELD in fields
